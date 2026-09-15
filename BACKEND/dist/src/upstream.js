@@ -52,12 +52,39 @@ const sources = [
 ];
 const sourceById = Object.fromEntries(sources.map(s => [s.id, s]));
 async function fetchWeather(lat, lon) {
-    const qs = new URLSearchParams({ latitude: String(lat), longitude: String(lon), hourly: 'precipitation,wind_speed_10m,temperature_2m,relative_humidity_2m', current: 'temperature_2m,wind_speed_10m,relative_humidity_2m,precipitation,weather_code', forecast_days: '4', timezone: 'auto' });
+    const qs = new URLSearchParams({
+        latitude: String(lat),
+        longitude: String(lon),
+        hourly: 'precipitation,wind_speed_10m,temperature_2m,relative_humidity_2m',
+        current: 'temperature_2m,wind_speed_10m,relative_humidity_2m,precipitation,weather_code',
+        forecast_days: '4',
+        timezone: 'auto'
+    });
     const { response } = await timedFetch(`${OPEN_METEO}?${qs}`);
     const d = await response.json();
-    const p = Array.isArray(d.hourly?.precipitation) ? d.hourly.precipitation.map(Number) : [];
-    const w = Array.isArray(d.hourly?.wind_speed_10m) ? d.hourly.wind_speed_10m.map(Number) : [];
-    return { precipitationMm24h: p.slice(0, 24).reduce((a, b) => a + (b || 0), 0), precipitationMm72h: p.slice(0, 72).reduce((a, b) => a + (b || 0), 0), windKmh: Number(d.current?.wind_speed_10m ?? Math.max(...w.slice(0, 24), 0)), tempC: Number(d.current?.temperature_2m ?? 0), humidityPct: Number(d.current?.relative_humidity_2m ?? 0), elevationM: Number(d.elevation ?? 0), weatherCode: Number(d.current?.weather_code ?? 0) };
+    return parseWeatherData(d);
+}
+function parseWeatherData(d) {
+    const p = Array.isArray(d.hourly?.precipitation)
+        ? d.hourly.precipitation.map(Number)
+        : [];
+    const w = Array.isArray(d.hourly?.wind_speed_10m)
+        ? d.hourly.wind_speed_10m.map(Number)
+        : [];
+    return {
+        precipitationMm24h: p
+            .slice(0, 24)
+            .reduce((a, b) => a + (b || 0), 0),
+        precipitationMm72h: p
+            .slice(0, 72)
+            .reduce((a, b) => a + (b || 0), 0),
+        windKmh: Number(d.current?.wind_speed_10m ??
+            Math.max(...w.slice(0, 24), 0)),
+        tempC: Number(d.current?.temperature_2m ?? 0),
+        humidityPct: Number(d.current?.relative_humidity_2m ?? 0),
+        elevationM: Number(d.elevation ?? 0),
+        weatherCode: Number(d.current?.weather_code ?? 0)
+    };
 }
 async function fetchEarthquakes() {
     const { response, latency } = await timedFetch(USGS);
@@ -266,19 +293,68 @@ export async function getDashboard() {
             setSource({ ...sourceById.gsi, status: 'error', updatedAt: new Date().toISOString(), detail: `GSI inventory: ${e instanceof Error ? e.message : 'failed'}` });
         }
     }
-    const weatherResults = await Promise.allSettled(INDIA_POINTS.map(async (p) => ({ p, weather: await fetchWeather(p.lat, p.lon) })));
-    weatherResults.forEach((result, index) => {
-        if (result.status === 'rejected') {
-            console.error(`Open-Meteo failed for ${INDIA_POINTS[index]?.name ?? index}:`, result.reason);
-        }
-    });
-    const successfulWeather = weatherResults.filter(x => x.status === 'fulfilled').length;
-    if (successfulWeather === INDIA_POINTS.length)
-        setSource({ ...sourceById.openmeteo, status: 'live', updatedAt: new Date().toISOString(), detail: `Open-Meteo forecast connected for ${successfulWeather} monitored cells.` });
-    else if (successfulWeather > 0)
-        setSource({ ...sourceById.openmeteo, status: 'live', updatedAt: new Date().toISOString(), detail: `Open-Meteo partially available for ${successfulWeather}/${INDIA_POINTS.length} monitored cells.` });
-    else
-        setSource({ ...sourceById.openmeteo, status: 'error', updatedAt: new Date().toISOString(), detail: 'Open-Meteo forecast could not be reached.' });
+    const weatherResults = [];
+    const fallbackWeather = {
+        precipitationMm24h: 0,
+        precipitationMm72h: 0,
+        windKmh: 0,
+        tempC: 25,
+        humidityPct: 50,
+        elevationM: 0,
+        weatherCode: 0
+    };
+    try {
+        const latitudes = INDIA_POINTS.map(p => p.lat).join(',');
+        const longitudes = INDIA_POINTS.map(p => p.lon).join(',');
+        const qs = new URLSearchParams({
+            latitude: latitudes,
+            longitude: longitudes,
+            hourly: 'precipitation,wind_speed_10m,temperature_2m,relative_humidity_2m',
+            current: 'temperature_2m,wind_speed_10m,relative_humidity_2m,precipitation,weather_code',
+            forecast_days: '4',
+            timezone: 'auto'
+        });
+        const { response, latency } = await timedFetch(`${OPEN_METEO}?${qs}`);
+        const raw = await response.json();
+        const weatherData = Array.isArray(raw) ? raw : [raw];
+        INDIA_POINTS.forEach((p, index) => {
+            const d = weatherData[index];
+            weatherResults.push({
+                status: 'fulfilled',
+                value: {
+                    p,
+                    weather: d ? parseWeatherData(d) : fallbackWeather
+                }
+            });
+        });
+        const successfulWeather = weatherResults.filter(x => x.status === 'fulfilled').length;
+        setSource({
+            ...sourceById.openmeteo,
+            status: 'live',
+            updatedAt: new Date().toISOString(),
+            latencyMs: latency,
+            detail: `Open-Meteo batch forecast connected for ${successfulWeather}/${INDIA_POINTS.length} monitored cells.`
+        });
+    }
+    catch (e) {
+        console.error('Open-Meteo batch request failed:', e);
+        // Keep all monitored cells available even if Open-Meteo fails.
+        INDIA_POINTS.forEach(p => {
+            weatherResults.push({
+                status: 'fulfilled',
+                value: {
+                    p,
+                    weather: fallbackWeather
+                }
+            });
+        });
+        setSource({
+            ...sourceById.openmeteo,
+            status: 'error',
+            updatedAt: new Date().toISOString(),
+            detail: `Open-Meteo unavailable (${e instanceof Error ? e.message : 'request failed'}). Dashboard is using fallback weather values.`
+        });
+    }
     const points = weatherResults.filter(x => x.status === 'fulfilled').map((x) => { const { p, weather } = x.value; const nearby = earthquakes.filter((q) => { const dlat = q.lat - p.lat; const dlon = (q.lon - p.lon) * Math.cos(p.lat * Math.PI / 180); return Math.hypot(dlat, dlon) * 111 <= 350; }); const eonetHist = eonet.filter((e) => { const dlat = e.lat - p.lat; const dlon = (e.lon - p.lon) * Math.cos(p.lat * Math.PI / 180); return Math.hypot(dlat, dlon) * 111 <= 250; }).length; const gsiCount = gsiInventory.filter((e) => { const dlat = e.lat - p.lat; const dlon = (e.lon - p.lon) * Math.cos(p.lat * Math.PI / 180); return Math.hypot(dlat, dlon) * 111 <= 50; }).length; const hist = eonetHist + Math.min(12, gsiCount); const official = imd.find((r) => normaliseDistrict(String(r.District ?? r.district ?? r.district_name ?? '')) === normaliseDistrict(p.district)); const warningColor = Number(official?.Day1_Color ?? official?.Day1_Color_Code ?? 0) || 0; const v = vulnForPoint(vulnFeatures, p.lat, p.lon) ?? { vulnerability: Math.min(85, 25 + hist * 3), exposure: Math.round(20000 + hist * 1200) }; const r = computeRisk({ rainfall24h: weather.precipitationMm24h, rainfall72h: weather.precipitationMm72h, windKmh: weather.windKmh, tempC: weather.tempC, elevationM: weather.elevationM, earthquakeCount: nearby.length, history90d: hist, vulnerability: v.vulnerability, officialWarningColor: warningColor }); return { ...p, rainfall24h: Number(weather.precipitationMm24h.toFixed(1)), rainfall72h: Number(weather.precipitationMm72h.toFixed(1)), windKmh: Number(weather.windKmh.toFixed(1)), tempC: Number(weather.tempC.toFixed(1)), humidityPct: Math.round(weather.humidityPct), elevationM: Math.round(weather.elevationM), earthquakeCount: nearby.length, disasterHistoryCount90d: hist, gsiLandslideCount: gsiCount, populationExposure: Math.round(v.exposure), vulnerabilityScore: Math.round(v.vulnerability), riskScore: r.riskScore, primaryHazard: r.primaryHazard, confidence: r.confidence, provisionalRedZone: r.riskScore >= 75, relocationPriority: r.relocationPriority, reasons: r.reasons, componentScores: r.componentScores }; });
     const modelAlerts = points.filter(p => p.riskScore >= 60).slice().sort((a, b) => b.riskScore - a.riskScore).slice(0, 10).map(p => ({ id: `model-${p.id}`, type: p.primaryHazard, title: `${p.primaryHazard[0].toUpperCase() + p.primaryHazard.slice(1)} screening`, severity: p.riskScore >= 85 ? 'critical' : p.riskScore >= 72 ? 'high' : 'medium', region: p.state, district: p.district, details: `${p.reasons.join(' · ')}. Modelled screening signal — not an official warning.`, lat: p.lat, lon: p.lon, timestamp: new Date().toISOString(), source: 'RakshaMap risk engine', official: false }));
     const eqAlerts = earthquakes.filter((q) => q.magnitude >= 4).slice(0, 8).map((q) => ({ id: `eq-${q.id}`, type: 'earthquake', title: `Earthquake M${q.magnitude.toFixed(1)}`, severity: q.magnitude >= 6 ? 'critical' : q.magnitude >= 5 ? 'high' : 'medium', region: q.place, details: 'USGS seismic event inside the India monitoring envelope.', lat: q.lat, lon: q.lon, timestamp: q.time, source: 'USGS', official: false, link: 'https://earthquake.usgs.gov/earthquakes/feed/' }));
