@@ -55,7 +55,7 @@ export function MapView({ mode, overlay, points, sites, onMapClick }: Props) {
         projection: 'globe',
         pitch: 18,
         maxPitch: 70,
-        attributionControl: true,
+        attributionControl: {},
         renderWorldCopies: false,
       })
 
@@ -119,7 +119,7 @@ export function MapView({ mode, overlay, points, sites, onMapClick }: Props) {
 
     const styles: Record<MapMode, any> = {
       globe: maptilersdk.MapStyle.HYBRID,
-      streets: maptilersdk.MapStyle.STREETS.LIGHT,
+      streets: maptilersdk.MapStyle.STREETS,
       satellite: maptilersdk.MapStyle.SATELLITE,
       terrain: maptilersdk.MapStyle.OUTDOOR,
     }
