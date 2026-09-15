@@ -1,0 +1,23 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {"type": "Point", "coordinates": [77.1734, 31.1048]},
+      "properties": {
+        "name": "Example verified relief centre",
+        "type": "relief_centre",
+        "capacity": 5000,
+        "occupied": 1200,
+        "beds": 200,
+        "water": true,
+        "power": true,
+        "medical": true,
+        "accessibility": true,
+        "hazard_score": 18,
+        "state": "Himachal Pradesh",
+        "district": "Shimla"
+      }
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+export const INDIA_POINTS = [
+ {id:'delhi',name:'Delhi NCR',state:'Delhi',district:'New Delhi',lat:28.6139,lon:77.2090},
+ {id:'dehradun',name:'Dehradun',state:'Uttarakhand',district:'Dehradun',lat:30.3165,lon:78.0322},
+ {id:'shimla',name:'Shimla',state:'Himachal Pradesh',district:'Shimla',lat:31.1048,lon:77.1734},
+ {id:'srinagar',name:'Srinagar',state:'Jammu and Kashmir',district:'Srinagar',lat:34.0837,lon:74.7973},
+ {id:'guwahati',name:'Guwahati',state:'Assam',district:'Kamrup Metropolitan',lat:26.1445,lon:91.7362},
+ {id:'kolkata',name:'Kolkata',state:'West Bengal',district:'Kolkata',lat:22.5726,lon:88.3639},
+ {id:'patna',name:'Patna',state:'Bihar',district:'Patna',lat:25.5941,lon:85.1376},
+ {id:'bhubaneswar',name:'Bhubaneswar',state:'Odisha',district:'Khordha',lat:20.2961,lon:85.8245},
+ {id:'mumbai',name:'Mumbai',state:'Maharashtra',district:'Mumbai City',lat:19.0760,lon:72.8777},
+ {id:'ahmedabad',name:'Ahmedabad',state:'Gujarat',district:'Ahmedabad',lat:23.0225,lon:72.5714},
+ {id:'kochi',name:'Kochi',state:'Kerala',district:'Ernakulam',lat:9.9312,lon:76.2673},
+ {id:'chennai',name:'Chennai',state:'Tamil Nadu',district:'Chennai',lat:13.0827,lon:80.2707},
+ {id:'hyderabad',name:'Hyderabad',state:'Telangana',district:'Hyderabad',lat:17.3850,lon:78.4867},
+ {id:'bengaluru',name:'Bengaluru',state:'Karnataka',district:'Bengaluru Urban',lat:12.9716,lon:77.5946},
+ {id:'jaipur',name:'Jaipur',state:'Rajasthan',district:'Jaipur',lat:26.9124,lon:75.7873},
+ {id:'ranchi',name:'Ranchi',state:'Jharkhand',district:'Ranchi',lat:23.3441,lon:85.3096},
+] as const
