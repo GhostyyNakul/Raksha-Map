@@ -52,9 +52,54 @@ const sourceById = Object.fromEntries(sources.map(s => [s.id, s])) as Record<str
 }
 
 async function fetchWeather(lat: number, lon: number) {
-  const qs = new URLSearchParams({ latitude: String(lat), longitude: String(lon), hourly: 'precipitation,wind_speed_10m,temperature_2m,relative_humidity_2m', current: 'temperature_2m,wind_speed_10m,relative_humidity_2m,precipitation,weather_code', forecast_days: '4', timezone: 'auto' })
-  const { response } = await timedFetch(`${OPEN_METEO}?${qs}`); const d: any = await response.json(); const p = Array.isArray(d.hourly?.precipitation) ? d.hourly.precipitation.map(Number) : []; const w = Array.isArray(d.hourly?.wind_speed_10m) ? d.hourly.wind_speed_10m.map(Number) : []
-  return { precipitationMm24h: p.slice(0, 24).reduce((a: number, b: number) => a + (b || 0), 0), precipitationMm72h: p.slice(0, 72).reduce((a: number, b: number) => a + (b || 0), 0), windKmh: Number(d.current?.wind_speed_10m ?? Math.max(...w.slice(0, 24), 0)), tempC: Number(d.current?.temperature_2m ?? 0), humidityPct: Number(d.current?.relative_humidity_2m ?? 0), elevationM: Number(d.elevation ?? 0), weatherCode: Number(d.current?.weather_code ?? 0) }
+  const qs = new URLSearchParams({
+    latitude: String(lat),
+    longitude: String(lon),
+    hourly: 'precipitation,wind_speed_10m,temperature_2m,relative_humidity_2m',
+    current: 'temperature_2m,wind_speed_10m,relative_humidity_2m,precipitation,weather_code',
+    forecast_days: '4',
+    timezone: 'auto'
+  })
+
+  const { response } = await timedFetch(`${OPEN_METEO}?${qs}`)
+  const d: any = await response.json()
+
+  return parseWeatherData(d)
+}
+
+function parseWeatherData(d: any) {
+  const p = Array.isArray(d.hourly?.precipitation)
+    ? d.hourly.precipitation.map(Number)
+    : []
+
+  const w = Array.isArray(d.hourly?.wind_speed_10m)
+    ? d.hourly.wind_speed_10m.map(Number)
+    : []
+
+  return {
+    precipitationMm24h: p
+      .slice(0, 24)
+      .reduce((a: number, b: number) => a + (b || 0), 0),
+
+    precipitationMm72h: p
+      .slice(0, 72)
+      .reduce((a: number, b: number) => a + (b || 0), 0),
+
+    windKmh: Number(
+      d.current?.wind_speed_10m ??
+      Math.max(...w.slice(0, 24), 0)
+    ),
+
+    tempC: Number(d.current?.temperature_2m ?? 0),
+
+    humidityPct: Number(
+      d.current?.relative_humidity_2m ?? 0
+    ),
+
+    elevationM: Number(d.elevation ?? 0),
+
+    weatherCode: Number(d.current?.weather_code ?? 0)
+  }
 }
 async function fetchEarthquakes() {
   const { response, latency } = await timedFetch(USGS); const d: any = await response.json(); setSource({ ...sourceById.usgs, status: 'live', updatedAt: new Date().toISOString(), latencyMs: latency, detail: 'USGS all-day earthquake feed connected.' }); return (d.features ?? []).map((f: any) => ({ id: String(f.id), lat: Number(f.geometry?.coordinates?.[1]), lon: Number(f.geometry?.coordinates?.[0]), magnitude: Number(f.properties?.mag ?? 0), place: String(f.properties?.place ?? 'Unknown'), time: new Date(Number(f.properties?.time ?? 0)).toISOString() })).filter((q: any) => q.lat >= 5 && q.lat <= 38 && q.lon >= 67 && q.lon <= 100)
@@ -163,15 +208,82 @@ export async function getDashboard() {
     try { const j = await fetchGeoJson(GSI_INVENTORY_URL); gsiInventory = parseGsiInventory(j); setSource({ ...sourceById.gsi, status: 'live', updatedAt: new Date().toISOString(), detail: `GSI landslide inventory connected (${gsiInventory.length} features).` }) }
     catch (e) { setSource({ ...sourceById.gsi, status: 'error', updatedAt: new Date().toISOString(), detail: `GSI inventory: ${e instanceof Error ? e.message : 'failed'}` }) }
   }
-  const weatherResults = await Promise.allSettled(INDIA_POINTS.map(async p => ({ p, weather: await fetchWeather(p.lat, p.lon) }))) 
-  weatherResults.forEach((result, index) => {
-  if (result.status === 'rejected') {
-    console.error(
-      `Open-Meteo failed for ${INDIA_POINTS[index]?.name ?? index}:`,
-      result.reason
-    )
-  }
-})
+  const weatherResults: PromiseSettledResult<{
+  p: typeof INDIA_POINTS[number]
+  weather: ReturnType<typeof parseWeatherData>
+}>[] = []
+
+try {
+  const latitudes = INDIA_POINTS.map(p => p.lat).join(',')
+  const longitudes = INDIA_POINTS.map(p => p.lon).join(',')
+
+  const qs = new URLSearchParams({
+    latitude: latitudes,
+    longitude: longitudes,
+    hourly: 'precipitation,wind_speed_10m,temperature_2m,relative_humidity_2m',
+    current: 'temperature_2m,wind_speed_10m,relative_humidity_2m,precipitation,weather_code',
+    forecast_days: '4',
+    timezone: 'auto'
+  })
+
+  const { response, latency } = await timedFetch(
+    `${OPEN_METEO}?${qs}`
+  )
+
+  const raw = await response.json()
+  const weatherData = Array.isArray(raw) ? raw : [raw]
+
+  INDIA_POINTS.forEach((p, index) => {
+    const d = weatherData[index]
+
+    if (!d) {
+      weatherResults.push({
+        status: 'rejected',
+        reason: new Error(`No weather data returned for ${p.name}`)
+      })
+      return
+    }
+
+    weatherResults.push({
+      status: 'fulfilled',
+      value: {
+        p,
+        weather: parseWeatherData(d)
+      }
+    })
+  })
+
+  const successfulWeather =
+    weatherResults.filter(x => x.status === 'fulfilled').length
+
+  setSource({
+    ...sourceById.openmeteo,
+    status: successfulWeather > 0 ? 'live' : 'error',
+    updatedAt: new Date().toISOString(),
+    latencyMs: latency,
+    detail: `Open-Meteo batch forecast connected for ${successfulWeather}/${INDIA_POINTS.length} monitored cells.`
+  })
+
+} catch (e) {
+
+  console.error('Open-Meteo batch request failed:', e)
+
+  INDIA_POINTS.forEach(p => {
+    weatherResults.push({
+      status: 'rejected',
+      reason: e
+    })
+  })
+
+  setSource({
+    ...sourceById.openmeteo,
+    status: 'error',
+    updatedAt: new Date().toISOString(),
+    detail: `Open-Meteo batch request failed: ${
+      e instanceof Error ? e.message : 'request failed'
+    }`
+  })
+}
   const successfulWeather = weatherResults.filter(x => x.status === 'fulfilled').length
   if (successfulWeather === INDIA_POINTS.length) setSource({ ...sourceById.openmeteo, status: 'live', updatedAt: new Date().toISOString(), detail: `Open-Meteo forecast connected for ${successfulWeather} monitored cells.` })
   else if (successfulWeather > 0) setSource({ ...sourceById.openmeteo, status: 'live', updatedAt: new Date().toISOString(), detail: `Open-Meteo partially available for ${successfulWeather}/${INDIA_POINTS.length} monitored cells.` })

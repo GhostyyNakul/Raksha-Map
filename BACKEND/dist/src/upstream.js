@@ -267,6 +267,11 @@ export async function getDashboard() {
         }
     }
     const weatherResults = await Promise.allSettled(INDIA_POINTS.map(async (p) => ({ p, weather: await fetchWeather(p.lat, p.lon) })));
+    weatherResults.forEach((result, index) => {
+        if (result.status === 'rejected') {
+            console.error(`Open-Meteo failed for ${INDIA_POINTS[index]?.name ?? index}:`, result.reason);
+        }
+    });
     const successfulWeather = weatherResults.filter(x => x.status === 'fulfilled').length;
     if (successfulWeather === INDIA_POINTS.length)
         setSource({ ...sourceById.openmeteo, status: 'live', updatedAt: new Date().toISOString(), detail: `Open-Meteo forecast connected for ${successfulWeather} monitored cells.` });
