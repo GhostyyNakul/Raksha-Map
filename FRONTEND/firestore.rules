@@ -1,0 +1,14 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // All application writes/read paths go through the backend API.
+    // Firebase Admin SDK uses IAM/application credentials and bypasses these rules.
+    // This prevents a malicious browser from writing directly into the moderation collections.
+    match /contributions/{id} {
+      allow read, write: if false;
+    }
+    match /moderation_audit/{id} {
+      allow read, write: if false;
+    }
+  }
+}
